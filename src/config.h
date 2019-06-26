@@ -21,4 +21,7 @@
 #define setfuncs(L, R) luaL_setfuncs(L, R, 0)
 #endif
 
+struct lua_State;
+LSEC_API int luaopen_ssl_config(struct lua_State *L);
+
 #endif

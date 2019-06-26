@@ -1,7 +1,7 @@
 /*--------------------------------------------------------------------------
- * LuaSec 0.6
+ * LuaSec 0.8
  *
- * Copyright (C) 2014-2016 Kim Alvefur, Paul Aurich, Tobias Markmann
+ * Copyright (C) 2014-2019 Kim Alvefur, Paul Aurich, Tobias Markmann
  *                         Matthew Wild, Bruno Silvestre.
  *
  *--------------------------------------------------------------------------*/
@@ -31,6 +31,17 @@
 #include <lauxlib.h>
 
 #include "x509.h"
+
+
+/*
+ * ASN1_STRING_data is deprecated in OpenSSL 1.1.0
+ */
+#if OPENSSL_VERSION_NUMBER>=0x1010000fL && !defined(LIBRESSL_VERSION_NUMBER)
+#define LSEC_ASN1_STRING_data(x) ASN1_STRING_get0_data(x)
+#else
+#define LSEC_ASN1_STRING_data(x) ASN1_STRING_data(x)
+#endif
+
 
 static const char* hex_tab = "0123456789abcdef";
 
@@ -146,7 +157,7 @@ static void push_asn1_string(lua_State* L, ASN1_STRING *string, int encode)
   }
   switch (encode) {
   case LSEC_AI5_STRING:
-    lua_pushlstring(L, (char*)ASN1_STRING_data(string),
+    lua_pushlstring(L, (char*)LSEC_ASN1_STRING_data(string),
                        ASN1_STRING_length(string));
     break;
   case LSEC_UTF8_STRING:
@@ -182,7 +193,7 @@ static void push_asn1_ip(lua_State *L, ASN1_STRING *string)
 {
   int af;
   char dst[INET6_ADDRSTRLEN];
-  unsigned char *ip = ASN1_STRING_data(string);
+  unsigned char *ip = (unsigned char*)LSEC_ASN1_STRING_data(string);
   switch(ASN1_STRING_length(string)) {
   case 4:
     af = AF_INET;
@@ -221,7 +232,7 @@ static int push_subtable(lua_State* L, int idx)
 }
 
 /**
- * Retrive the general names from the object.
+ * Retrieve the general names from the object.
  */
 static int push_x509_name(lua_State* L, X509_NAME *name, int encode)
 {
@@ -249,7 +260,7 @@ static int push_x509_name(lua_State* L, X509_NAME *name, int encode)
 /*---------------------------------------------------------------------------*/
 
 /**
- * Retrive the Subject from the certificate.
+ * Retrieve the Subject from the certificate.
  */
 static int meth_subject(lua_State* L)
 {
@@ -258,7 +269,7 @@ static int meth_subject(lua_State* L)
 }
 
 /**
- * Retrive the Issuer from the certificate.
+ * Retrieve the Issuer from the certificate.
  */
 static int meth_issuer(lua_State* L)
 {
@@ -293,11 +304,11 @@ int meth_extensions(lua_State* L)
       break;
 
     /* Push ret[oid] */
-    push_asn1_objname(L, extension->object, 1);
+    push_asn1_objname(L, X509_EXTENSION_get_object(extension), 1);
     push_subtable(L, -2);
 
     /* Set ret[oid].name = name */
-    push_asn1_objname(L, extension->object, 0);
+    push_asn1_objname(L, X509_EXTENSION_get_object(extension), 0);
     lua_setfield(L, -2, "name");
 
     n_general_names = sk_GENERAL_NAME_num(values);
@@ -361,6 +372,7 @@ int meth_extensions(lua_State* L)
         break;
       }
     }
+    sk_GENERAL_NAME_free(values);
     lua_pop(L, 1); /* ret[oid] */
     i++;           /* Next extension */
   }
@@ -404,7 +416,7 @@ static int meth_pubkey(lua_State* L)
     bytes = BIO_get_mem_data(bio, &data);
     if (bytes > 0) {
       lua_pushlstring(L, data, bytes);
-      switch(EVP_PKEY_type(pkey->type)) {
+      switch(EVP_PKEY_base_id(pkey)) {
         case EVP_PKEY_RSA:
           lua_pushstring(L, "RSA");
           break;
